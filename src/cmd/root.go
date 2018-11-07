@@ -1,14 +1,22 @@
 package cmd
 
 import (
+	"bufio"
+	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	_ "github.com/lib/pq"
 )
 
 type Option struct {
 	Host       string
+	Port       int
 	Database   string
 	User       string
 	Pass       string
@@ -19,22 +27,25 @@ type Option struct {
 	EscapeType string
 	Nullas     string
 	QuoteNull  bool
+	RequireSsl bool
 }
 
 var opt Option
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&opt.Host, "host", "h", "", "host name to connect")
-	rootCmd.PersistentFlags().StringVarP(&opt.Database, "databse", "d", "", "database identifier to connect")
-	rootCmd.PersistentFlags().StringVarP(&opt.User, "user", "u", "", "user name using authentication")
-	rootCmd.PersistentFlags().StringVarP(&opt.Pass, "pass", "p", "", "password using authentication")
+	rootCmd.PersistentFlags().StringVar(&opt.Host, "host", "h", "host name to connect")
+	rootCmd.PersistentFlags().IntVarP(&opt.Port, "port", "p", 5432, "database identifier to connect")
+	rootCmd.PersistentFlags().StringVar(&opt.Database, "databse", "d", "database identifier to connect")
+	rootCmd.PersistentFlags().StringVar(&opt.User, "user", "u", "user name using authentication")
+	rootCmd.PersistentFlags().StringVar(&opt.Pass, "pass", "w", "password using authentication")
 	rootCmd.PersistentFlags().StringVarP(&opt.SQL, "sql", "q", "", "sql to execute.")
 	rootCmd.PersistentFlags().StringVarP(&opt.Quote, "quote", "", "\"", "quote csv column")
 	rootCmd.PersistentFlags().StringVarP(&opt.Sepalate, "sepalate", "s", ",", "quote csv column")
 	rootCmd.PersistentFlags().BoolVarP(&opt.Escape, "escape", "e", true, "escape spacial characters if use quots")
 	rootCmd.PersistentFlags().StringVarP(&opt.EscapeType, "escapetype", "", "cascade", "escape method. 'cascade' or 'backslash'")
 	rootCmd.PersistentFlags().StringVarP(&opt.Nullas, "nullas", "", "", "output of null as csv data")
-	rootCmd.PersistentFlags().BoolVarP(&opt.QuoteNull, "nullas", "", true, "put quotes on null column")
+	rootCmd.PersistentFlags().BoolVarP(&opt.QuoteNull, "quotenull", "", true, "put quotes on null column")
+	rootCmd.PersistentFlags().BoolVarP(&opt.RequireSsl, "requiressl", "", false, "use ssl forced")
 }
 
 var rootCmd = &cobra.Command{
@@ -42,11 +53,6 @@ var rootCmd = &cobra.Command{
 	Short: "connect to postgresql database and pull csv.",
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := adjustArg(); err != nil {
-			fmt.Println(err.Error())
-			return
-		}
-
-		if err := argCheck(); err != nil {
 			fmt.Println(err.Error())
 			return
 		}
@@ -66,16 +72,137 @@ func Execute() {
 }
 
 func adjustArg() error {
-	// TODO:
-	return nil
-}
+	stdin := bufio.NewScanner(os.Stdin)
+	if piped := stdin.Text(); piped != "" {
+		opt.SQL = piped
+	}
 
-func argCheck() error {
-	// TODO:
 	return nil
 }
 
 func readAndWriteCSV() error {
-	// TODO:
+
+	sslmode := "disable"
+	if opt.RequireSsl {
+		sslmode = "require"
+	}
+	dbSourceName := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		opt.Host, opt.Port, opt.Database, opt.Pass, sslmode)
+
+	db, err := sql.Open("postgres", dbSourceName)
+	if err != nil {
+		return err
+	}
+
+	rows, err := db.Query(opt.SQL)
+	if err != nil {
+		return err
+	}
+	columns, _ := rows.Columns()
+	for rows.Next() {
+		row := make([]interface{}, len(columns))
+		for idx := range columns {
+			row[idx] = new(MetalScanner)
+		}
+
+		err := rows.Scan(row...)
+		if err != nil {
+			return err
+		}
+		writeCSV(row, &columns)
+	}
+
+	return nil
+}
+
+func writeCSV(row []interface{}, columns *[]string) {
+	bytes := make([]byte, 0)
+	l := len(*columns)
+	for idx := range *columns {
+		var scanner = row[idx].(*MetalScanner)
+
+		v, isnull := scanner.value.(string)
+		if !isnull {
+			v = escapeAsOption(v)
+			v = opt.Quote + v + opt.Quote
+		} else {
+			v = opt.Nullas
+			if opt.QuoteNull {
+				v = opt.Quote + v + opt.Quote
+			}
+		}
+
+		bytes = append(bytes, v...)
+		if idx < l-1 {
+			bytes = append(bytes, opt.Sepalate...)
+		}
+	}
+
+	fmt.Println(string(bytes))
+}
+
+func escapeAsOption(v string) string {
+	if !opt.Escape {
+		return v
+	}
+
+	switch opt.EscapeType {
+	case "cascade":
+		v = strings.Replace(v, "\"", "\"\"", -1)
+		break
+	case "backslash":
+		v = strings.Replace(v, "\\", "\\\\", -1)
+		v = strings.Replace(v, "\"", "\\\"", -1)
+		break
+	}
+
+	return v
+}
+
+type MetalScanner struct {
+	valid bool
+	value interface{}
+}
+
+func (scanner *MetalScanner) getBytes(src interface{}) []byte {
+	if a, ok := src.([]uint8); ok {
+		return a
+	}
+	return nil
+}
+func (scanner *MetalScanner) Scan(src interface{}) error {
+	switch src.(type) {
+	case int64:
+		if value, ok := src.(int64); ok {
+			scanner.value = string(value)
+			scanner.valid = true
+		}
+	case float64:
+		if value, ok := src.(float64); ok {
+			scanner.value = fmt.Sprintf("%f", value)
+			scanner.valid = true
+		}
+	case bool:
+		if value, ok := src.(bool); ok {
+			scanner.value = strconv.FormatBool(value)
+			scanner.valid = true
+		}
+	case string:
+		//value := scanner.getBytes(src)
+		scanner.value = src.(string)
+		scanner.valid = true
+	case []byte:
+		value := scanner.getBytes(src)
+		scanner.value = string(value)
+		scanner.valid = true
+	case time.Time:
+		if value, ok := src.(time.Time); ok {
+			scanner.value = value.Format("2006-01-02 15:04:05")
+			scanner.valid = true
+		}
+	case nil:
+		scanner.value = nil
+		scanner.valid = true
+	}
 	return nil
 }
