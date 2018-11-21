@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"database/sql"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -50,17 +50,24 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&opt.RequireSsl, "requiressl", false, "use ssl forced")
 }
 
+const cmdname = "pq-csv-console"
+
 var rootCmd = &cobra.Command{
-	Use:   "pq-csv-console",
+	Use:   cmdname,
 	Short: "connect to postgresql database and pull csv.",
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := adjustArg(); err != nil {
-			fmt.Println(err.Error())
+			fmt.Fprintf(os.Stderr, err.Error())
+			return
+		}
+
+		if err := argCheck(); err != nil {
+			fmt.Fprintf(os.Stderr, err.Error())
 			return
 		}
 
 		if err := readAndWriteCSV(); err != nil {
-			fmt.Println(err.Error())
+			fmt.Fprintf(os.Stderr, err.Error())
 			return
 		}
 	},
@@ -74,11 +81,29 @@ func Execute() {
 }
 
 func adjustArg() error {
-	stdin := bufio.NewScanner(os.Stdin)
-	if piped := stdin.Text(); piped != "" {
-		opt.SQL = piped
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		bs, _ := ioutil.ReadAll(os.Stdin)
+		opt.SQL = string(bs)
 	}
+	return nil
+}
 
+func argCheck() error {
+	if opt.Pass == "" {
+		return fmt.Errorf("Option `--pass password` required")
+	}
+	if opt.SQL == "" {
+		return fmt.Errorf("No sql inputed. Please give --sql \"SELECT QUERY\" or pipe stdout like `echo SELECT QUERY | %s`", cmdname)
+	}
+	switch opt.EscapeType {
+	case "cascade":
+		break
+	case "backslash":
+		break
+	default:
+		return fmt.Errorf("--escapetype %s is invalid", opt.EscapeType)
+	}
 	return nil
 }
 
