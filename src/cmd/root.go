@@ -39,7 +39,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&opt.Port, "port", "p", 5432, "database identifier to connect")
 	rootCmd.PersistentFlags().StringVarP(&opt.Database, "database", "d", "postgres", "database identifier to connect")
 	rootCmd.PersistentFlags().StringVarP(&opt.User, "user", "u", "postgres", "user name using authentication")
-	rootCmd.PersistentFlags().StringVar(&opt.Pass, "pass", "", "password using authentication")
+	rootCmd.PersistentFlags().StringVarP(&opt.Pass, "pass", "w", "", "password using authentication")
 	rootCmd.PersistentFlags().StringVar(&opt.SQL, "sql", "", "sql to execute.")
 	rootCmd.PersistentFlags().StringVar(&opt.Quote, "quote", "\"", "quote csv column")
 	rootCmd.PersistentFlags().StringVarP(&opt.Sepalate, "sepalate", "s", ",", "quote csv column")
@@ -89,7 +89,7 @@ func readAndWriteCSV() error {
 		sslmode = "require"
 	}
 	dbSourceName := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		opt.Host, opt.Port, opt.Database, opt.Pass, sslmode)
+		opt.Host, opt.Port, opt.User, opt.Pass, opt.Database, sslmode)
 
 	db, err := sql.Open("postgres", dbSourceName)
 	if err != nil {
@@ -100,6 +100,7 @@ func readAndWriteCSV() error {
 	if err != nil {
 		return err
 	}
+
 	columns, _ := rows.Columns()
 	for rows.Next() {
 		row := make([]interface{}, len(columns))
@@ -120,12 +121,14 @@ func readAndWriteCSV() error {
 func writeCSV(row []interface{}, columns *[]string) {
 	bytes := make([]byte, 0)
 	l := len(*columns)
+
 	for idx := range *columns {
 		var scanner = row[idx].(*MetalScanner)
 
-		v, isnull := scanner.value.(string)
-		if !isnull {
-			v = escapeAsOption(v)
+		v, notnull := scanner.value.(string)
+
+		if notnull {
+			v = escapeValue(v)
 			v = opt.Quote + v + opt.Quote
 		} else {
 			v = opt.Nullas
@@ -143,11 +146,10 @@ func writeCSV(row []interface{}, columns *[]string) {
 	fmt.Println(string(bytes))
 }
 
-func escapeAsOption(v string) string {
+func escapeValue(v string) string {
 	if !opt.Escape {
 		return v
 	}
-
 	switch opt.EscapeType {
 	case "cascade":
 		v = strings.Replace(v, "\"", "\"\"", -1)
@@ -176,7 +178,7 @@ func (scanner *MetalScanner) Scan(src interface{}) error {
 	switch src.(type) {
 	case int64:
 		if value, ok := src.(int64); ok {
-			scanner.value = string(value)
+			scanner.value = strconv.FormatInt(value, 10)
 			scanner.valid = true
 		}
 	case float64:
