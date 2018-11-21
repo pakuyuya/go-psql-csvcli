@@ -15,6 +15,7 @@ import (
 )
 
 type Option struct {
+	Help       bool
 	Host       string
 	Port       int
 	Database   string
@@ -33,19 +34,20 @@ type Option struct {
 var opt Option
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&opt.Host, "host", "h", "host name to connect")
+	rootCmd.PersistentFlags().BoolVarP(&opt.Help, "help", "", false, "help for "+rootCmd.Name())
+	rootCmd.PersistentFlags().StringVarP(&opt.Host, "host", "h", "localhost", "host name to connect")
 	rootCmd.PersistentFlags().IntVarP(&opt.Port, "port", "p", 5432, "database identifier to connect")
-	rootCmd.PersistentFlags().StringVar(&opt.Database, "databse", "d", "database identifier to connect")
-	rootCmd.PersistentFlags().StringVar(&opt.User, "user", "u", "user name using authentication")
-	rootCmd.PersistentFlags().StringVar(&opt.Pass, "pass", "w", "password using authentication")
-	rootCmd.PersistentFlags().StringVarP(&opt.SQL, "sql", "q", "", "sql to execute.")
-	rootCmd.PersistentFlags().StringVarP(&opt.Quote, "quote", "", "\"", "quote csv column")
+	rootCmd.PersistentFlags().StringVarP(&opt.Database, "database", "d", "postgres", "database identifier to connect")
+	rootCmd.PersistentFlags().StringVarP(&opt.User, "user", "u", "postgres", "user name using authentication")
+	rootCmd.PersistentFlags().StringVar(&opt.Pass, "pass", "", "password using authentication")
+	rootCmd.PersistentFlags().StringVar(&opt.SQL, "sql", "", "sql to execute.")
+	rootCmd.PersistentFlags().StringVar(&opt.Quote, "quote", "\"", "quote csv column")
 	rootCmd.PersistentFlags().StringVarP(&opt.Sepalate, "sepalate", "s", ",", "quote csv column")
 	rootCmd.PersistentFlags().BoolVarP(&opt.Escape, "escape", "e", true, "escape spacial characters if use quots")
-	rootCmd.PersistentFlags().StringVarP(&opt.EscapeType, "escapetype", "", "cascade", "escape method. 'cascade' or 'backslash'")
-	rootCmd.PersistentFlags().StringVarP(&opt.Nullas, "nullas", "", "", "output of null as csv data")
-	rootCmd.PersistentFlags().BoolVarP(&opt.QuoteNull, "quotenull", "", true, "put quotes on null column")
-	rootCmd.PersistentFlags().BoolVarP(&opt.RequireSsl, "requiressl", "", false, "use ssl forced")
+	rootCmd.PersistentFlags().StringVar(&opt.EscapeType, "escapetype", "cascade", "escape method. 'cascade' or 'backslash'")
+	rootCmd.PersistentFlags().StringVar(&opt.Nullas, "nullas", "", "output of null as csv data")
+	rootCmd.PersistentFlags().BoolVar(&opt.QuoteNull, "quotenull", true, "put quotes on null column")
+	rootCmd.PersistentFlags().BoolVar(&opt.RequireSsl, "requiressl", false, "use ssl forced")
 }
 
 var rootCmd = &cobra.Command{
@@ -86,7 +88,7 @@ func readAndWriteCSV() error {
 	if opt.RequireSsl {
 		sslmode = "require"
 	}
-	dbSourceName := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+	dbSourceName := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		opt.Host, opt.Port, opt.Database, opt.Pass, sslmode)
 
 	db, err := sql.Open("postgres", dbSourceName)
