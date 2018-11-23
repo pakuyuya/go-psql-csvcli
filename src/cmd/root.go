@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"../pgpass"
+
 	_ "github.com/lib/pq"
 )
 
@@ -40,6 +42,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&opt.Database, "database", "d", "postgres", "database identifier to connect")
 	rootCmd.PersistentFlags().StringVarP(&opt.User, "user", "u", "postgres", "user name using authentication")
 	rootCmd.PersistentFlags().StringVarP(&opt.Pass, "pass", "w", "", "password using authentication")
+	rootCmd.PersistentFlags().StringVarP(&opt.Pass, "usepgpass", "", "", "password using authentication")
 	rootCmd.PersistentFlags().StringVar(&opt.SQL, "sql", "", "sql to execute.")
 	rootCmd.PersistentFlags().StringVar(&opt.Quote, "quote", "\"", "quote csv column")
 	rootCmd.PersistentFlags().StringVarP(&opt.Sepalate, "sepalate", "s", ",", "quote csv column")
@@ -86,12 +89,25 @@ func adjustArg() error {
 		bs, _ := ioutil.ReadAll(os.Stdin)
 		opt.SQL = string(bs)
 	}
+
+	if opt.Pass == "" {
+		// load pgpass Setting
+		pgs, err := pgpass.LoadDefaultSettings()
+		if err != nil {
+			for _, pg := range pgs {
+				if pg.Match(opt.Host, strconv.Itoa(opt.Port), opt.Database, opt.User) {
+					opt.Pass = pg.Password
+					break
+				}
+			}
+		}
+	}
 	return nil
 }
 
 func argCheck() error {
 	if opt.Pass == "" {
-		return fmt.Errorf("Option `--pass password` required")
+		return fmt.Errorf("No password inputed. Please set option `--pass password` or edit pgpass file")
 	}
 	if opt.SQL == "" {
 		return fmt.Errorf("No sql inputed. Please give --sql \"SELECT QUERY\" or pipe stdout like `echo SELECT QUERY | %s`", cmdname)
